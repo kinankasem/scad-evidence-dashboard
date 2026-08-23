@@ -1,4 +1,0 @@
-@import "tailwindcss";
-html, body, .site-shell { width: 100%; min-height: 100%; margin: 0; }
-body { overflow: hidden; background: #f4f7fa; }
-.site-frame { display: block; width: 100%; height: 100vh; border: 0; }

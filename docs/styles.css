@@ -31,6 +31,7 @@ button { color: inherit; }
 .brand { gap: 18px; min-width: 440px; }
 .logo { object-fit: contain; }
 .scad-logo { width: 160px; height: 54px; }
+.pvi-primary-logo { width: 145px; }
 .pvi-logo { width: 112px; height: 53px; }
 .brand-divider { width: 1px; height: 42px; background: var(--line); }
 .eyebrow { margin: 0 0 4px; color: var(--blue); font-size: 10px; font-weight: 700; letter-spacing: .13em; }

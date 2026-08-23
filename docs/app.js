@@ -11,6 +11,7 @@
     'Spatial Data Schema': 'Spatial Data Schema Development & Maintenance',
   };
   const seed = structuredClone(window.SCAD_SEED || { requests: [], gaps: [], evidenceRegister: [], existingEvidence: [] });
+  const clone = (value) => structuredClone(value);
   let state = loadLocalState();
   let apiUrl = localStorage.getItem(API_KEY) || window.SCAD_CONFIG?.API_URL || '';
   let currentRecordTab = 'register';
@@ -20,7 +21,6 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-  const clone = (value) => structuredClone(value);
   const nonEmpty = (value) => value !== null && value !== undefined && String(value).trim() !== '';
   const canonicalDomain = (domain) => DOMAIN_ALIASES[domain] || domain || 'Unassigned';
   const pct = (value) => `${Math.round(Number.isFinite(value) ? value : 0)}%`;
