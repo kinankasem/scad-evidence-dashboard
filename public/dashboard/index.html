@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#123f64" />
+  <meta name="description" content="Interactive dashboard for evidence tracking, gap assessment, and procedural file completeness at SCAD." />
+  <meta property="og:title" content="SCAD Evidence & Gap Assessment Dashboard" />
+  <meta property="og:description" content="Evidence tracking, gap assessment, and procedural file completion" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="./assets/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" href="./assets/pvi-logo.png" />
+  <title>SCAD | Evidence & Gap Assessment Dashboard</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    <div class="brand">
+      <img src="./assets/pvi-logo.png" alt="Pivotal Vision logo" class="logo scad-logo pvi-primary-logo" />
+      <span class="brand-divider" aria-hidden="true"></span>
+      <div><p class="eyebrow">GEOSPATIAL OPERATIONS GOVERNANCE</p><h1>Evidence & Gap Assessment Dashboard</h1></div>
+    </div>
+    <div class="topbar-tools">
+      <label class="global-search"><span aria-hidden="true">⌕</span><input id="global-search" type="search" placeholder="Search all records..." aria-label="Search all records" /></label>
+      <button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button>
+      <div class="sync-pill" id="sync-pill"><span class="live-dot"></span><div><strong>Local mode</strong><small>Saved on this device</small></div></div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-page="dashboard"><span>⌂</span><b>Overview</b></button>
+        <button class="nav-item" data-page="requests"><span>▤</span><b>Evidence Requests</b><em id="nav-request-count">49</em></button>
+        <button class="nav-item" data-page="gaps"><span>◫</span><b>Gap Assessment</b><em id="nav-gap-count">45</em></button>
+        <button class="nav-item" data-page="files"><span>▱</span><b>Evidence Register</b></button>
+        <button class="nav-item" data-page="completion"><span>◎</span><b>Process Completion</b></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button class="nav-item" data-page="settings"><span>⚙</span><b>Data & Settings</b></button>
+        <div class="sidebar-note"><span class="live-dot"></span><div><strong>Excel sources connected</strong><small>Direct import and export</small></div></div>
+      </div>
+    </aside>
+
+    <main class="content" id="main-content">
+      <section class="page active" data-view="dashboard">
+        <div class="hero">
+          <div><span class="section-kicker">EXECUTIVE SUMMARY</span><h2>A unified view of evidence status and procedural readiness</h2><p>Live tracking of requests, assessment maturity, and priority gaps across GIS operational domains.</p></div>
+          <div class="hero-actions"><span class="last-update" id="last-update"></span><button class="secondary-button" data-action="export">⇩ Export Excel</button><button class="primary-button" data-action="add-request">＋ Add Evidence</button></div>
+        </div>
+        <section class="kpi-grid" aria-label="Key performance indicators">
+          <article class="kpi-card navy"><span class="kpi-icon">▤</span><span class="kpi-label">Total Evidence Requests</span><strong id="kpi-total-requests">—</strong><small id="kpi-domain-count">—</small></article>
+          <article class="kpi-card blue"><span class="kpi-icon">✓</span><span class="kpi-label">Known Evidence Coverage</span><strong id="kpi-coverage">—</strong><small id="kpi-known-count">—</small></article>
+          <article class="kpi-card teal"><span class="kpi-icon">◉</span><span class="kpi-label">Operational Maturity</span><strong id="kpi-maturity">—</strong><small id="kpi-assessed">—</small></article>
+          <article class="kpi-card red"><span class="kpi-icon">!</span><span class="kpi-label">Open Critical Items</span><strong id="kpi-critical">—</strong><small>Require priority follow-up</small></article>
+        </section>
+        <section class="dashboard-grid">
+          <article class="panel evidence-chart-panel"><div class="panel-heading"><div><span>EVIDENCE STATUS</span><h3>Evidence Request Distribution</h3></div><button class="text-button" data-page-link="requests">View register →</button></div><div class="donut-layout"><div class="donut-wrap"><canvas id="status-chart" width="220" height="220" aria-label="Evidence status distribution chart"></canvas><div class="donut-center"><strong id="donut-center-value">—</strong><small>requests</small></div></div><div class="legend" id="status-legend"></div></div></article>
+          <article class="panel maturity-panel"><div class="panel-heading"><div><span>DOMAIN COVERAGE</span><h3>Completion by Operational Domain</h3></div><button class="text-button" data-page-link="completion">Details →</button></div><div class="domain-bars" id="domain-bars"></div></article>
+          <article class="panel attention-panel"><div class="panel-heading"><div><span>NEEDS ATTENTION</span><h3>Highest Priority Items</h3></div><span class="count-badge" id="attention-count">0</span></div><div id="attention-list"></div></article>
+          <article class="panel assessment-panel"><div class="panel-heading"><div><span>ASSESSMENT STATUS</span><h3>Gap Rating Profile</h3></div><button class="text-button" data-page-link="gaps">Matrix →</button></div><div class="rating-summary" id="rating-summary"></div></article>
+        </section>
+        <article class="panel domain-table-panel"><div class="panel-heading"><div><span>DOMAIN SUMMARY</span><h3>Performance and Requests by Domain</h3></div></div><div class="table-wrap"><table><thead><tr><th>Domain</th><th>Evidence Requests</th><th>Known / Current</th><th>Evidence Completion</th><th>Assessment Maturity</th><th>Status</th></tr></thead><tbody id="domain-summary-body"></tbody></table></div></article>
+      </section>
+
+      <section class="page" data-view="requests">
+        <div class="page-header"><div><span class="section-kicker">TRACKING LIST</span><h2>Evidence Requests</h2><p>Manage requested evidence, owners, dates, received files, and review outcomes.</p></div><button class="primary-button" data-action="add-request">＋ Add Evidence Request</button></div>
+        <div class="toolbar"><label class="search-box"><span>⌕</span><input id="request-search" type="search" placeholder="Search ID, group, or description..." /></label><select id="request-domain-filter" aria-label="Filter domain"><option value="">All domains</option></select><select id="request-status-filter" aria-label="Filter status"><option value="">All statuses</option></select><button class="secondary-button" data-action="export-evidence">⇩ Export List</button></div>
+        <div class="result-meta"><span id="request-result-count"></span><button class="link-button" data-action="clear-request-filters">Clear filters</button></div>
+        <div class="table-card"><div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Domain / Group</th><th>Evidence Requested</th><th>Priority</th><th>Tracking Status</th><th>Owner</th><th>Target Date</th><th>Review Result</th><th></th></tr></thead><tbody id="requests-body"></tbody></table></div></div>
+      </section>
+
+      <section class="page" data-view="gaps">
+        <div class="page-header"><div><span class="section-kicker">ASSESSMENT MATRIX</span><h2>Gap and Control Assessment</h2><p>Rate requirements, link evidence, and document observations and corrective actions.</p></div><button class="primary-button" data-action="add-gap">＋ Add Requirement</button></div>
+        <div class="toolbar"><label class="search-box"><span>⌕</span><input id="gap-search" type="search" placeholder="Search ID, control, or observation..." /></label><select id="gap-domain-filter"><option value="">All domains</option></select><select id="gap-rating-filter"><option value="">All ratings</option></select><select id="gap-priority-filter"><option value="">All priorities</option></select><button class="secondary-button" data-action="export-gap">⇩ Export Matrix</button></div>
+        <div class="result-meta"><span id="gap-result-count"></span><button class="link-button" data-action="clear-gap-filters">Clear filters</button></div>
+        <div class="table-card"><div class="table-wrap"><table class="data-table"><thead><tr><th>ID</th><th>Domain / Control</th><th>Evidence Refs</th><th>Rating</th><th>Gap / Observation</th><th>Recommended Action</th><th>Priority</th><th></th></tr></thead><tbody id="gaps-body"></tbody></table></div></div>
+      </section>
+
+      <section class="page" data-view="files">
+        <div class="page-header"><div><span class="section-kicker">UNIFIED REFERENCE</span><h2>Evidence and File Register</h2><p>Index operational evidence and current or legacy files, mapped to the relevant domains.</p></div><button class="primary-button" data-action="add-evidence">＋ Add Evidence File</button></div>
+        <div class="segmented" role="tablist"><button class="active" data-record-tab="register">Evidence Register <span id="register-tab-count"></span></button><button data-record-tab="existing">Current & Legacy Files <span id="existing-tab-count"></span></button></div>
+        <div class="records-grid" id="evidence-cards"></div>
+      </section>
+
+      <section class="page" data-view="completion">
+        <div class="page-header"><div><span class="section-kicker">PROCESS READINESS</span><h2>Evidence and Procedural File Completion</h2><p>A connected view of evidence availability, assessment progress, and maturity by domain.</p></div></div>
+        <div class="completion-hero"><div><span>Overall Composite Indicator</span><strong id="overall-completion">—</strong><p>Average of evidence coverage and gap-assessment maturity</p></div><div class="completion-meter"><i id="overall-meter"></i></div></div>
+        <div class="completion-grid" id="completion-grid"></div>
+      </section>
+
+      <section class="page" data-view="settings">
+        <div class="page-header"><div><span class="section-kicker">DATA SOURCE</span><h2>Data and Synchronization</h2><p>Import Excel files, download updated copies, or enable shared editing through Google Sheets.</p></div></div>
+        <div class="settings-grid">
+          <article class="settings-card"><span class="settings-icon">⇧</span><div><h3>Import from Excel</h3><p>Select either source file or both. The app recognizes the original worksheet names automatically.</p><label class="upload-zone"><input type="file" id="excel-import" accept=".xlsx,.xls" multiple /><strong>Choose Excel Files</strong><small>SCAD Gap Assessment and Evidence Tracking</small></label></div></article>
+          <article class="settings-card"><span class="settings-icon">⇩</span><div><h3>Export Updated Copies</h3><p>Create two Excel-compatible files containing all current edits.</p><div class="button-row"><button class="secondary-button" data-action="export-gap">Gap Assessment File</button><button class="secondary-button" data-action="export-evidence">Evidence Tracking File</button></div></div></article>
+          <article class="settings-card shared-card"><span class="settings-icon">↻</span><div><h3>Shared Editing for All Visitors</h3><p>Add a Google Apps Script web-app URL so edits are shared with everyone who has the page link.</p><label class="field-label">Shared Data Service URL<input id="api-url" type="url" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec" /></label><div class="button-row"><button class="primary-button" data-action="save-api">Save & Enable</button><button class="secondary-button" data-action="sync-now">Sync Now</button></div><small class="hint">Without this URL, edits are saved only on the current device.</small></div></article>
+          <article class="settings-card"><span class="settings-icon">↺</span><div><h3>Baseline Data</h3><p>Restore the records extracted from the two supplied files and discard local edits.</p><div class="source-links"><a href="./data/SCAD-Gap-Assessment.xlsx" download>Download Original Gap File</a><a href="./data/SCAD-Evidence-Tracking.xlsx" download>Download Original Evidence File</a></div><button class="danger-button" data-action="reset-data">Restore Original Data</button></div></article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><span id="modal-kicker"></span><h2 id="modal-title"></h2></div><button class="icon-button" id="modal-close" aria-label="Close">×</button></header><form id="record-form"><div class="form-grid" id="form-fields"></div><footer><button type="button" class="secondary-button" id="modal-cancel">Cancel</button><button type="submit" class="primary-button">Save Changes</button></footer></form></section>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="./data/seed-data.js"></script>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
