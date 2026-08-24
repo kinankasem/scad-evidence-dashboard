@@ -1,8 +1,14 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'scad-dashboard-data-v1';
+  const STORAGE_KEY = 'scad-dashboard-data-v2';
   const API_KEY = 'scad-dashboard-api-url';
+  const SOURCE_DB_NAME = 'scad-dashboard-source-files-v1';
+  const SOURCE_STORE = 'workbooks';
+  const SOURCE_FILES = {
+    gap: './data/SCAD-Gap-Assessment.xlsx',
+    evidence: './data/SCAD-Evidence-Tracking.xlsx',
+  };
   const RATING_SCORE = { 'Established': 3, 'Partially Established': 2, 'Significant Gap': 1, 'Not Established': 0 };
   const RATING_COLORS = { 'Established': '#2c9b74', 'Partially Established': '#d49a36', 'Significant Gap': '#d56b4d', 'Not Established': '#b83d4e', 'Not Assessed': '#a7b5bf' };
   const STATUS_COLORS = { 'Received': '#2c9b74', 'Partially Received': '#3182a7', 'Requested': '#d49a36', 'To Request': '#b83d4e', 'Other': '#8799a8' };
@@ -17,6 +23,7 @@
   let currentRecordTab = 'register';
   let editing = null;
   let toastTimer;
+  const sourceBuffers = { gap: null, evidence: null };
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -67,7 +74,7 @@
       const requests = state.requests.filter((item) => canonicalDomain(item.domain) === domain);
       const gaps = state.gaps.filter((item) => canonicalDomain(item.domain) === domain);
       const known = requests.filter((item) => evidenceStatusGroup(item.trackingStatus) !== 'To Request').length;
-      const assessed = gaps.filter((item) => nonEmpty(item.rating));
+      const assessed = gaps.filter((item) => Object.hasOwn(RATING_SCORE, item.rating));
       const maturity = assessed.length ? assessed.reduce((sum, item) => sum + (RATING_SCORE[item.rating] ?? 0), 0) / (assessed.length * 3) * 100 : 0;
       const coverage = requests.length ? known / requests.length * 100 : 0;
       const composite = (coverage + maturity) / 2;
@@ -77,10 +84,23 @@
 
   function metrics() {
     const known = state.requests.filter((item) => evidenceStatusGroup(item.trackingStatus) !== 'To Request').length;
-    const assessed = state.gaps.filter((item) => nonEmpty(item.rating));
+    const assessed = state.gaps.filter((item) => Object.hasOwn(RATING_SCORE, item.rating));
     const maturity = assessed.length ? assessed.reduce((sum, item) => sum + (RATING_SCORE[item.rating] ?? 0), 0) / (assessed.length * 3) * 100 : 0;
     const criticalOpen = state.requests.filter((item) => item.priority === 'Critical' && evidenceStatusGroup(item.trackingStatus) !== 'Received').length;
-    return { known, coverage: state.requests.length ? known / state.requests.length * 100 : 0, assessed: assessed.length, maturity, criticalOpen, domains: domainStats() };
+    const gapDomains = unique(state.gaps.map((item) => canonicalDomain(item.domain))).map((domain) => {
+      const gaps = state.gaps.filter((item) => canonicalDomain(item.domain) === domain);
+      const domainAssessed = gaps.filter((item) => Object.hasOwn(RATING_SCORE, item.rating));
+      const domainMaturity = domainAssessed.length ? domainAssessed.reduce((sum, item) => sum + RATING_SCORE[item.rating], 0) / (domainAssessed.length * 3) * 100 : 0;
+      return {
+        domain,
+        total: gaps.length,
+        assessed: domainAssessed.length,
+        unassessed: gaps.length - domainAssessed.length,
+        coverage: gaps.length ? domainAssessed.length / gaps.length * 100 : 0,
+        maturity: domainMaturity,
+      };
+    });
+    return { known, coverage: state.requests.length ? known / state.requests.length * 100 : 0, assessed: assessed.length, maturity, criticalOpen, domains: domainStats(), gapDomains };
   }
 
   function badge(value, kind = '') {
@@ -139,45 +159,53 @@
 
   function renderDashboard() {
     const m = metrics();
-    $('#kpi-total-requests').textContent = state.requests.length;
-    $('#kpi-domain-count').textContent = `Across ${m.domains.length} operational domains`;
-    $('#kpi-coverage').textContent = pct(m.coverage);
-    $('#kpi-known-count').textContent = `${m.known} known / current evidence items`;
-    $('#kpi-maturity').textContent = pct(m.maturity);
-    $('#kpi-assessed').textContent = `${m.assessed} of ${state.gaps.length} requirements assessed`;
-    $('#kpi-critical').textContent = m.criticalOpen;
-    $('#donut-center-value').textContent = state.requests.length;
-
-    const statusCounts = state.requests.reduce((map, item) => {
-      const group = evidenceStatusGroup(item.trackingStatus);
-      map[group] = (map[group] || 0) + 1;
-      return map;
-    }, {});
-    $('#status-legend').innerHTML = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => `<div><i style="background:${STATUS_COLORS[name]}"></i><span>${esc(name)}</span><strong>${count}</strong></div>`).join('');
-
-    $('#domain-bars').innerHTML = m.domains.filter((item) => item.requests).map((item) => `<div class="domain-bar"><div><span title="${esc(item.domain)}">${esc(shortDomain(item.domain))}</span><strong>${pct(item.coverage)}</strong></div><div class="bar-track"><i style="width:${Math.min(100, item.coverage)}%"></i></div></div>`).join('');
-
-    const attention = state.requests.filter((item) => ['Critical', 'High'].includes(item.priority) && evidenceStatusGroup(item.trackingStatus) !== 'Received').slice(0, 5);
-    $('#attention-count').textContent = attention.length;
-    $('#attention-list').innerHTML = attention.length ? attention.map((item) => `<button class="attention-row" data-edit-type="request" data-id="${esc(item.id)}"><span>${badge(item.priority, 'priority')}</span><div><strong>${esc(item.group || item.requested)}</strong><small>${esc(shortDomain(item.domain))} · ${esc(item.trackingStatus || 'Not set')}</small></div><b>${esc(item.id)}</b></button>`).join('') : '<div class="empty-state compact">No high-priority open items.</div>';
-
     const ratings = ['Established', 'Partially Established', 'Significant Gap', 'Not Established', 'Not Assessed'];
     const ratingCounts = ratings.map((rating) => ({ rating, count: state.gaps.filter((item) => (item.rating || 'Not Assessed') === rating).length }));
-    $('#rating-summary').innerHTML = ratingCounts.map((item) => `<div><span><i style="background:${RATING_COLORS[item.rating]}"></i>${esc(item.rating)}</span><strong>${item.count}</strong><div class="mini-track"><i style="width:${state.gaps.length ? item.count / state.gaps.length * 100 : 0}%;background:${RATING_COLORS[item.rating]}"></i></div></div>`).join('');
+    $('#kpi-gap-total').textContent = state.gaps.length;
+    $('#kpi-gap-domains').textContent = `Across ${m.gapDomains.length} operational domains`;
+    $('#kpi-gap-assessed').textContent = m.assessed;
+    $('#kpi-assessment-coverage').textContent = `${pct(state.gaps.length ? m.assessed / state.gaps.length * 100 : 0)} of requirements assessed`;
+    $('#kpi-gap-maturity').textContent = pct(m.maturity);
+    $('#kpi-gap-unassessed').textContent = state.gaps.length - m.assessed;
+    $('#gap-donut-value').textContent = m.assessed;
 
-    $('#domain-summary-body').innerHTML = m.domains.map((item) => {
-      const stateLabel = item.composite >= 75 ? 'On Track' : item.composite >= 45 ? 'Needs Attention' : 'Priority Gap';
-      return `<tr><td><strong>${esc(item.domain)}</strong></td><td>${item.requests}</td><td>${item.known}</td><td><div class="cell-progress"><i style="width:${item.coverage}%"></i><span>${pct(item.coverage)}</span></div></td><td><div class="cell-progress maturity"><i style="width:${item.maturity}%"></i><span>${pct(item.maturity)}</span></div></td><td>${badge(stateLabel, 'state')}</td></tr>`;
+    $('#gap-rating-legend').innerHTML = ratingCounts.map((item) => `<div><i style="background:${RATING_COLORS[item.rating]}"></i><span>${esc(item.rating)}</span><strong>${item.count}</strong></div>`).join('');
+
+    $('#gap-domain-bars').innerHTML = m.gapDomains.map((item) => `<div class="domain-bar gap-domain-bar"><div><span title="${esc(item.domain)}">${esc(shortDomain(item.domain))}</span><strong>${item.assessed}/${item.total} assessed</strong></div><div class="bar-track"><i style="width:${Math.min(100, item.coverage)}%"></i></div><small>Coverage ${pct(item.coverage)} · Maturity ${pct(item.maturity)}</small></div>`).join('');
+
+    const priorities = ['High', 'Medium', 'Low', 'Not Set'].map((priority) => ({
+      priority,
+      count: state.gaps.filter((item) => (item.priority || 'Not Set') === priority).length,
+    }));
+    const maxPriority = Math.max(1, ...priorities.map((item) => item.count));
+    $('#gap-priority-chart').innerHTML = priorities.map((item) => `<div class="priority-column"><strong>${item.count}</strong><div class="column-track"><i class="${slug(item.priority)}" style="height:${Math.max(5, item.count / maxPriority * 100)}%"></i></div><span>${esc(item.priority)}</span></div>`).join('');
+
+    const attention = state.gaps.filter((item) => ['Not Established', 'Significant Gap'].includes(item.rating) || (Object.hasOwn(RATING_SCORE, item.rating) && item.priority === 'High')).sort((a, b) => {
+      const scoreDiff = (RATING_SCORE[a.rating] ?? 99) - (RATING_SCORE[b.rating] ?? 99);
+      return scoreDiff || String(a.id).localeCompare(String(b.id));
+    });
+    $('#gap-attention-count').textContent = attention.length;
+    $('#gap-attention-list').innerHTML = attention.length ? attention.slice(0, 6).map((item) => `<button class="attention-row" data-edit-type="gap" data-id="${esc(item.id)}"><span>${badge(item.priority || 'Not set', 'priority')}</span><div><strong>${esc(item.control || item.gapIssue || item.question)}</strong><small>${esc(shortDomain(item.domain))} · ${esc(item.rating || 'Not Assessed')}</small></div><b>${esc(item.id)}</b></button>`).join('') : '<div class="empty-state compact">No assessed priority gaps are currently recorded.</div>';
+
+    $('#gap-domain-summary-body').innerHTML = m.gapDomains.map((item) => {
+      const mix = ratings.map((rating) => {
+        const count = state.gaps.filter((gap) => canonicalDomain(gap.domain) === item.domain && (gap.rating || 'Not Assessed') === rating).length;
+        return count ? `<span class="rating-dot" title="${esc(rating)}"><i style="background:${RATING_COLORS[rating]}"></i>${count}</span>` : '';
+      }).join('');
+      return `<tr><td><strong>${esc(item.domain)}</strong></td><td>${item.total}</td><td>${item.assessed}</td><td>${item.unassessed}</td><td><div class="cell-progress"><i style="width:${item.coverage}%"></i><span>${pct(item.coverage)}</span></div></td><td><div class="cell-progress maturity"><i style="width:${item.maturity}%"></i><span>${pct(item.maturity)}</span></div></td><td><div class="rating-mix">${mix}</div></td></tr>`;
     }).join('');
+
+    const evidenceSnapshot = state.requests.slice(0, 10);
+    $('#evidence-snapshot-body').innerHTML = evidenceSnapshot.length ? evidenceSnapshot.map((item) => `<tr><td><button class="id-link" data-edit-type="request" data-id="${esc(item.id)}">${esc(item.id)}</button></td><td>${esc(shortDomain(item.domain))}</td><td>${esc(item.group || '—')}</td><td>${badge(item.priority || 'Not set', 'priority')}</td><td>${badge(item.trackingStatus || 'Not set', 'status')}</td><td>${formatDate(item.targetDate)}</td></tr>`).join('') : emptyTableRow(6, 'No evidence requests are available.');
     requestAnimationFrame(renderDashboardCharts);
   }
 
   function renderDashboardCharts() {
-    const canvas = $('#status-chart');
+    const canvas = $('#gap-rating-chart');
     if (!canvas || !canvas.offsetParent) return;
-    const groups = ['Received', 'Partially Received', 'Requested', 'To Request', 'Other'];
-    const values = groups.map((group) => state.requests.filter((item) => evidenceStatusGroup(item.trackingStatus) === group).length);
-    drawDonut(canvas, values, groups.map((group) => STATUS_COLORS[group]));
+    const ratings = ['Established', 'Partially Established', 'Significant Gap', 'Not Established', 'Not Assessed'];
+    const values = ratings.map((rating) => state.gaps.filter((item) => (item.rating || 'Not Assessed') === rating).length);
+    drawDonut(canvas, values, ratings.map((rating) => RATING_COLORS[rating]));
   }
 
   function drawDonut(canvas, values, colors) {
@@ -316,7 +344,7 @@
     const index = collection.findIndex((item) => item.id === editing.originalId);
     if (index >= 0) collection[index] = { ...collection[index], ...record };
     else collection.unshift(record);
-    saveLocalState(); closeEditor(); renderAll(); toast('Record saved successfully.'); await pushRemote();
+    saveLocalState(); closeEditor(); renderAll(); toast('Record saved. Download the updated source workbook to retain this change in Excel.'); await pushRemote();
   }
 
   async function deleteRecord(type, id) {
@@ -364,53 +392,208 @@
     return true;
   }
 
-  function sheetFromRecords(headers, keys, records) {
-    return XLSX.utils.aoa_to_sheet([headers, ...records.map((record) => keys.map((key) => record[key] ?? ''))]);
+  function openSourceDb() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error('IndexedDB is unavailable'));
+      const request = indexedDB.open(SOURCE_DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(SOURCE_STORE);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
   }
 
-  function exportGapWorkbook() {
-    if (!requireXlsx()) return;
-    const workbook = XLSX.utils.book_new();
+  async function sourceDbGet(key) {
+    try {
+      const db = await openSourceDb();
+      return await new Promise((resolve, reject) => {
+        const transaction = db.transaction(SOURCE_STORE, 'readonly');
+        const request = transaction.objectStore(SOURCE_STORE).get(key);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (_) { return null; }
+  }
+
+  async function sourceDbSet(key, value) {
+    try {
+      const db = await openSourceDb();
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(SOURCE_STORE, 'readwrite');
+        transaction.objectStore(SOURCE_STORE).put(value, key);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+    } catch (_) {}
+  }
+
+  async function sourceDbClear() {
+    try {
+      const db = await openSourceDb();
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(SOURCE_STORE, 'readwrite');
+        transaction.objectStore(SOURCE_STORE).clear();
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+    } catch (_) {}
+  }
+
+  async function getSourceBuffer(kind) {
+    if (sourceBuffers[kind]) return sourceBuffers[kind].slice(0);
+    const stored = await sourceDbGet(kind);
+    if (stored) {
+      sourceBuffers[kind] = stored;
+      return stored.slice(0);
+    }
+    const response = await fetch(SOURCE_FILES[kind]);
+    if (!response.ok) throw new Error(`Could not load the ${kind} source workbook`);
+    const buffer = await response.arrayBuffer();
+    sourceBuffers[kind] = buffer;
+    return buffer.slice(0);
+  }
+
+  function excelValue(key, value) {
+    if (!nonEmpty(value)) return '';
+    if (['requestDate', 'targetDate', 'receivedDate'].includes(key)) {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? value : parsed;
+    }
+    return value;
+  }
+
+  function patchSheetRecords(sheet, startRow, keys, records) {
+    const range = XLSX.utils.decode_range(sheet['!ref'] || `A1:${XLSX.utils.encode_col(keys.length - 1)}${startRow}`);
+    const templateRow = Math.max(startRow - 1, Math.min(range.e.r + 1, startRow));
+    const oldEndRow = range.e.r + 1;
+    const newEndRow = startRow + records.length - 1;
+    const endRow = Math.max(oldEndRow, newEndRow);
+    for (let row = startRow; row <= endRow; row += 1) {
+      const record = records[row - startRow];
+      keys.forEach((key, column) => {
+        const address = XLSX.utils.encode_cell({ r: row - 1, c: column });
+        const templateAddress = XLSX.utils.encode_cell({ r: templateRow - 1, c: column });
+        const previous = sheet[address] || sheet[templateAddress] || {};
+        const value = record ? excelValue(key, record[key]) : '';
+        const cell = { ...previous, v: value };
+        delete cell.f;
+        delete cell.w;
+        if (value instanceof Date) {
+          cell.t = 'd';
+          cell.z = previous.z || 'dd-mmm-yyyy';
+        } else if (typeof value === 'number') cell.t = 'n';
+        else cell.t = 's';
+        sheet[address] = cell;
+      });
+    }
+    range.e.r = Math.max(range.e.r, newEndRow - 1);
+    range.e.c = Math.max(range.e.c, keys.length - 1);
+    sheet['!ref'] = XLSX.utils.encode_range(range);
+    return { oldEndRow, newEndRow };
+  }
+
+  function updateGapSummaryRanges(workbook, oldEndRow, newEndRow) {
+    if (oldEndRow === newEndRow) return;
+    workbook.SheetNames.forEach((sheetName) => {
+      const sheet = workbook.Sheets[sheetName];
+      Object.values(sheet).forEach((cell) => {
+        if (!cell?.f || !cell.f.includes('Gap Assessment')) return;
+        cell.f = cell.f.replace(new RegExp(`(\\$?[A-Z]{1,3}\\$?7:\\$?[A-Z]{1,3}\\$?)${oldEndRow}`, 'g'), `$1${newEndRow}`);
+        delete cell.v;
+        delete cell.w;
+      });
+    });
+    workbook.Workbook = workbook.Workbook || {};
+    workbook.Workbook.CalcPr = { ...(workbook.Workbook.CalcPr || {}), fullCalcOnLoad: true, forceFullCalc: true };
+  }
+
+  function downloadWorkbook(bytes, filename) {
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  function copyArrayBuffer(bytes) {
+    if (bytes instanceof ArrayBuffer) return bytes.slice(0);
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  }
+
+  async function buildGapWorkbook() {
+    const workbook = XLSX.read(await getSourceBuffer('gap'), { type: 'array', cellDates: true, cellStyles: true });
     const gapKeys = ['id','domain','control','question','typicalEvidence','evidenceRefs','observation','rating','gapIssue','recommendedAction','priority'];
-    const gapHeaders = ['ID','Domain','Requirement / Control','Assessment Question','Typical Evidence','Evidence Ref(s)','Current Practice / Observation','Rating','Gap / Issue','Recommended Action','Priority'];
     const evidenceKeys = ['id','name','type','dateVersion','owner','domains','coverage','received','reviewNotes'];
-    const evidenceHeaders = ['Evidence ID','Evidence Name','Type','Date / Version','Owner / Source','Related Domain(s)','Coverage / Relevance','Received?','Review Notes'];
-    XLSX.utils.book_append_sheet(workbook, sheetFromRecords(gapHeaders, gapKeys, state.gaps), 'Gap Assessment');
-    XLSX.utils.book_append_sheet(workbook, sheetFromRecords(evidenceHeaders, evidenceKeys, state.evidenceRegister), 'Evidence Register');
-    XLSX.writeFile(workbook, 'SCAD-Gap-Assessment-Updated.xlsx');
-    toast('Updated gap assessment workbook downloaded.');
+    const gapRange = patchSheetRecords(workbook.Sheets['Gap Assessment'], 7, gapKeys, state.gaps);
+    patchSheetRecords(workbook.Sheets['Evidence Register'], 6, evidenceKeys, state.evidenceRegister);
+    updateGapSummaryRanges(workbook, gapRange.oldEndRow, gapRange.newEndRow);
+    return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
   }
 
-  function exportEvidenceWorkbook() {
-    if (!requireXlsx()) return;
-    const workbook = XLSX.utils.book_new();
+  async function buildEvidenceWorkbook() {
+    const workbook = XLSX.read(await getSourceBuffer('evidence'), { type: 'array', cellDates: true, cellStyles: true });
     const requestKeys = ['id','domain','group','requested','minimumExpected','purpose','priority','legacyReference','trackingStatus','owner','requestDate','targetDate','receivedDate','receivedFile','reviewResult','reviewNotes'];
-    const requestHeaders = ['Request ID','Domain','Evidence Group','Evidence / Information Requested','Examples / Minimum Expected','Assessment Purpose','Priority','Known Existing / Legacy Reference','Tracking Status','SCAD Owner','Request Date','Target Date','Received Date','Received File / Ref','Review Result','Review Notes / Gap Ref'];
     const existingKeys = ['id','source','level','documentCode','fileName','fileType','description','masterStatus','workingStatus','domains'];
-    const existingHeaders = ['Evidence ID','Source','Level / Folder','Document Code','Document / File Name','File Type','Master List Description','Master List Status','Working Status','Mapped Domain(s)'];
-    XLSX.utils.book_append_sheet(workbook, sheetFromRecords(requestHeaders, requestKeys, state.requests), 'Request Tracker');
-    XLSX.utils.book_append_sheet(workbook, sheetFromRecords(existingHeaders, existingKeys, state.existingEvidence), 'Existing Evidence');
-    XLSX.writeFile(workbook, 'SCAD-Evidence-Tracking-Updated.xlsx');
-    toast('Updated evidence tracking workbook downloaded.');
+    patchSheetRecords(workbook.Sheets['Request Tracker'], 6, requestKeys, state.requests);
+    patchSheetRecords(workbook.Sheets['Existing Evidence'], 6, existingKeys, state.existingEvidence);
+    return XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
+  }
+
+  async function exportGapWorkbook(showToast = true) {
+    if (!requireXlsx()) return;
+    try {
+      const bytes = await buildGapWorkbook();
+      const buffer = copyArrayBuffer(bytes);
+      sourceBuffers.gap = buffer;
+      await sourceDbSet('gap', buffer);
+      downloadWorkbook(bytes, 'SCAD-Gap-Assessment-Updated.xlsx');
+      if (showToast) toast('Updated gap assessment source workbook downloaded.');
+    } catch (error) { toast(`Gap workbook export failed: ${error.message}`, 'error'); }
+  }
+
+  async function exportEvidenceWorkbook(showToast = true) {
+    if (!requireXlsx()) return;
+    try {
+      const bytes = await buildEvidenceWorkbook();
+      const buffer = copyArrayBuffer(bytes);
+      sourceBuffers.evidence = buffer;
+      await sourceDbSet('evidence', buffer);
+      downloadWorkbook(bytes, 'SCAD-Evidence-Tracking-Updated.xlsx');
+      if (showToast) toast('Updated evidence tracking source workbook downloaded.');
+    } catch (error) { toast(`Evidence workbook export failed: ${error.message}`, 'error'); }
   }
 
   function rowsFromSheet(sheet, headerRow, keys) {
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-    return rows.slice(headerRow).filter((row) => nonEmpty(row[0])).map((row) => Object.fromEntries(keys.map((key, index) => [key, String(row[index] ?? '').trim()])));
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true, cellDates: true });
+    return rows.slice(headerRow).filter((row) => nonEmpty(row[0])).map((row) => Object.fromEntries(keys.map((key, index) => {
+      const value = row[index];
+      if (value instanceof Date) return [key, value.toISOString().slice(0, 10)];
+      return [key, String(value ?? '').trim()];
+    })));
   }
 
   async function importExcel(files) {
     if (!files.length || !requireXlsx()) return;
     let changed = false;
     for (const file of files) {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
-      if (workbook.Sheets['Request Tracker']) { state.requests = rowsFromSheet(workbook.Sheets['Request Tracker'], 5, ['id','domain','group','requested','minimumExpected','purpose','priority','legacyReference','trackingStatus','owner','requestDate','targetDate','receivedDate','receivedFile','reviewResult','reviewNotes']); changed = true; }
-      if (workbook.Sheets['Existing Evidence']) { state.existingEvidence = rowsFromSheet(workbook.Sheets['Existing Evidence'], 5, ['id','source','level','documentCode','fileName','fileType','description','masterStatus','workingStatus','domains']); changed = true; }
-      if (workbook.Sheets['Gap Assessment']) { state.gaps = rowsFromSheet(workbook.Sheets['Gap Assessment'], 6, ['id','domain','control','question','typicalEvidence','evidenceRefs','observation','rating','gapIssue','recommendedAction','priority']); changed = true; }
-      if (workbook.Sheets['Evidence Register']) { state.evidenceRegister = rowsFromSheet(workbook.Sheets['Evidence Register'], 5, ['id','name','type','dateVersion','owner','domains','coverage','received','reviewNotes']); changed = true; }
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, cellStyles: true });
+      if (workbook.Sheets['Request Tracker']) {
+        state.requests = rowsFromSheet(workbook.Sheets['Request Tracker'], 5, ['id','domain','group','requested','minimumExpected','purpose','priority','legacyReference','trackingStatus','owner','requestDate','targetDate','receivedDate','receivedFile','reviewResult','reviewNotes']);
+        if (workbook.Sheets['Existing Evidence']) state.existingEvidence = rowsFromSheet(workbook.Sheets['Existing Evidence'], 5, ['id','source','level','documentCode','fileName','fileType','description','masterStatus','workingStatus','domains']);
+        sourceBuffers.evidence = buffer.slice(0); await sourceDbSet('evidence', buffer.slice(0)); changed = true;
+      }
+      if (workbook.Sheets['Gap Assessment']) {
+        state.gaps = rowsFromSheet(workbook.Sheets['Gap Assessment'], 6, ['id','domain','control','question','typicalEvidence','evidenceRefs','observation','rating','gapIssue','recommendedAction','priority']);
+        if (workbook.Sheets['Evidence Register']) state.evidenceRegister = rowsFromSheet(workbook.Sheets['Evidence Register'], 5, ['id','name','type','dateVersion','owner','domains','coverage','received','reviewNotes']);
+        sourceBuffers.gap = buffer.slice(0); await sourceDbSet('gap', buffer.slice(0)); changed = true;
+      }
     }
     if (!changed) return toast('No recognized source worksheets were found.', 'error');
-    saveLocalState(); renderAll(); toast('Excel data imported successfully.'); await pushRemote();
+    saveLocalState(); renderAll(); toast('Excel source imported. The dashboard now reflects the uploaded workbook.'); await pushRemote();
   }
 
   function clearRequestFilters() { $('#request-search').value = ''; $('#request-domain-filter').value = ''; $('#request-status-filter').value = ''; renderRequests(); }
@@ -429,14 +612,14 @@
     if (action === 'add-request') openEditor('request');
     if (action === 'add-gap') openEditor('gap');
     if (action === 'add-evidence') openEditor(currentRecordTab === 'register' ? 'evidence' : 'existing');
-    if (action === 'export-gap') exportGapWorkbook();
-    if (action === 'export-evidence') exportEvidenceWorkbook();
-    if (action === 'export') { exportGapWorkbook(); setTimeout(exportEvidenceWorkbook, 350); }
+    if (action === 'export-gap') await exportGapWorkbook();
+    if (action === 'export-evidence') await exportEvidenceWorkbook();
+    if (action === 'export') { await exportGapWorkbook(false); await exportEvidenceWorkbook(false); toast('Both updated source workbooks were downloaded.'); }
     if (action === 'clear-request-filters') clearRequestFilters();
     if (action === 'clear-gap-filters') clearGapFilters();
     if (action === 'save-api') { apiUrl = $('#api-url').value.trim(); localStorage.setItem(API_KEY, apiUrl); updateSyncPill(apiUrl ? 'shared' : 'local'); toast(apiUrl ? 'Shared data URL saved.' : 'Returned to local-only mode.'); if (apiUrl) await smartSync(); }
     if (action === 'sync-now') await smartSync();
-    if (action === 'reset-data' && confirm('Restore the original records and discard all local edits?')) { state = clone(seed); saveLocalState(); renderAll(); toast('Original workbook data restored.'); await pushRemote(); }
+    if (action === 'reset-data' && confirm('Restore the original records and discard all local edits?')) { state = clone(seed); sourceBuffers.gap = null; sourceBuffers.evidence = null; await sourceDbClear(); saveLocalState(); renderAll(); toast('Original workbook data restored.'); await pushRemote(); }
   });
 
   $('#record-form').addEventListener('submit', saveEditor);
