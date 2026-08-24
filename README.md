@@ -1,4 +1,4 @@
-# SCAD Evidence & Gap Assessment Dashboard
+# Evidence & Gap Assessment Dashboard
 
 A static, GitHub Pages-ready dashboard built from the supplied SCAD Excel workbooks. The application supports dashboards, filtering, record creation and editing, gap ratings, process-completion views, Excel import/export, device-local persistence, and optional shared editing through Google Sheets and Apps Script.
 
